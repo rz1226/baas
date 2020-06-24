@@ -3,8 +3,31 @@ package baas
 import (
 	"errors"
 	"fmt"
+	"github.com/rz1226/encrypt"
+	"github.com/rz1226/gobutil"
 	"github.com/rz1226/mysqlx"
+	"os"
+	"reflect"
 )
+
+/**
+
+CREATE TABLE `baas_item` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `key` varchar(50) DEFAULT NULL,
+  `content` MEDIUMBLOB DEFAULT NULL comment'数据内容',
+
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+
+  `last_update_time` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  PRIMARY KEY (`id`),
+  unique (`key`)
+
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4;
+
+
+
+*/
 
 // 本质是数据库的一条数据
 
@@ -31,19 +54,22 @@ baas 的背后是mongo数据库吗
 5 获取列表，排序规则是添加时间
 */
 
-//表示本baas服务的底层数据，本质是一个字符串
+type Baas struct {
+	Dbkit *mysqlx.DB
+	Table string
+}
 
 // 返回数据唯一表示 key
-func set(key, data string) error {
-	if exist(key) {
-		return replace(key, data)
+func (b *Baas) set(key, data string) error {
+	if b.exist(key) {
+		return b.replace(key, data)
 	} else {
-		return add(key, data)
+		return b.add(key, data)
 	}
 
 }
 
-func add(key, data string) error {
+func (b *Baas) add(key, data string) error {
 	if key == "" {
 		return errors.New("key 不能为空")
 	}
@@ -52,19 +78,19 @@ func add(key, data string) error {
 	item.Key = key
 	item.Content = data
 
-	sql, err := mysqlx.NewBM(item).ToSQLInsert("baas_item")
+	sql, err := mysqlx.NewBM(item).ToSQLInsert(b.Table)
 	if err != nil {
 		return err
 	}
-	_, err = sql.Exec(Dbkit)
+	_, err = sql.Exec(b.Dbkit)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func exist(key string) bool {
-	res, err := mysqlx.SQLStr("select id from baas_item  where `key` = ? limit 1").AddParams(key).Query(Dbkit)
+func (b *Baas) exist(key string) bool {
+	res, err := mysqlx.SQLStr("select id from " + b.Table + "  where `key` = ? limit 1").AddParams(key).Query(b.Dbkit)
 	if err != nil {
 		return false
 	}
@@ -76,15 +102,15 @@ func exist(key string) bool {
 }
 
 // 修改数据
-func replace(key, data string) error {
-	_, err := mysqlx.SQLStr("update baas_item set content = ? where `key` = ? limit 1").AddParams(data, key).Exec(Dbkit)
+func (b *Baas) replace(key, data string) error {
+	_, err := mysqlx.SQLStr("update "+b.Table+" set content = ? where `key` = ? limit 1").AddParams(data, key).Exec(b.Dbkit)
 	return err
 }
 
-func get(key string) (string, error) {
+func (b *Baas) get(key string) (string, error) {
 	item := new(baasItem)
 	//var item *Item
-	res, err := mysqlx.SQLStr("select * from baas_item where `key` = ? limit 1 ").AddParams(key).Query(Dbkit)
+	res, err := mysqlx.SQLStr("select * from " + b.Table + " where `key` = ? limit 1 ").AddParams(key).Query(b.Dbkit)
 	if err != nil {
 		return "", err
 	}
@@ -96,11 +122,11 @@ func get(key string) (string, error) {
 }
 
 //批量get 最大1000个
-func getDataBatch(keys ...string) ([]string, error) {
+func (b *Baas) getDataBatch(keys ...string) ([]string, error) {
 	//var item *Item
-	sql := mysqlx.SQLStr("select `key`,`content` from baas_item where ").AddParams(nil).In("key", keys).Limit(1000)
+	sql := mysqlx.SQLStr("select `key`,`content` from "+b.Table+" where ").AddParams(nil).In("key", keys).Limit(1000)
 	fmt.Println(sql.Info())
-	res, err := sql.Query(Dbkit)
+	res, err := sql.Query(b.Dbkit)
 	if err != nil {
 		return nil, err
 	}
@@ -117,13 +143,13 @@ func getDataBatch(keys ...string) ([]string, error) {
 
 }
 
-func del(key string) error {
-	_, err := mysqlx.SQLStr("delete from baas_item  where `key` = ? limit 1").AddParams(key).Exec(Dbkit)
+func (b *Baas) del(key string) error {
+	_, err := mysqlx.SQLStr("delete from " + b.Table + "  where `key` = ? limit 1").AddParams(key).Exec(b.Dbkit)
 	return err
 }
 
 //默认根据时间排序 返回key列表
-func list(page int, pagesize int) ([]string, error) {
+func (b *Baas) list(page int, pagesize int) ([]string, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -132,8 +158,8 @@ func list(page int, pagesize int) ([]string, error) {
 	}
 	offset := pagesize * (page - 1)
 	limit := pagesize
-	sql := mysqlx.SQLStr("select `key`,`content` from baas_item order by id desc limit " + fmt.Sprint(limit) + " offset  " + fmt.Sprint(offset))
-	res, err := sql.Query(Dbkit)
+	sql := mysqlx.SQLStr("select `key`,`content` from " + b.Table + " order by id desc limit " + fmt.Sprint(limit) + " offset  " + fmt.Sprint(offset))
+	res, err := sql.Query(b.Dbkit)
 	if err != nil {
 		return nil, err
 	}
@@ -147,4 +173,122 @@ func list(page int, pagesize int) ([]string, error) {
 		result = append(result, v.Content)
 	}
 	return result, nil
+}
+
+// set key  如果forceSet == false 则没有在Key的位置是空的时候，才会set一个随机key    返回值为strut最终的key
+func setKey(dstStruct interface{}, key string, forceSet bool) string {
+
+	defer func() {
+		if co := recover(); co != nil {
+			str := "SetKey error:发生panic :" + fmt.Sprint(co)
+			fmt.Println(str)
+			os.Exit(1)
+		}
+	}()
+	isSet := false
+	v := reflect.ValueOf(dstStruct)
+
+	switch v.Kind() {
+	case reflect.Ptr:
+		t := v.Type().Elem()
+
+		for i := 0; i < v.Elem().NumField(); i++ {
+			fieldName := t.Field(i).Name
+			vType := t.Field(i).Type
+			if fmt.Sprint(vType) == "string" && fieldName == "Key" {
+				if v.Elem().Field(i).Interface().(string) == "" {
+					v.Elem().Field(i).Set(reflect.ValueOf(key))
+				}
+				if forceSet {
+					v.Elem().Field(i).Set(reflect.ValueOf(key))
+				}
+				isSet = true
+				return v.Elem().Field(i).Interface().(string)
+			} else {
+
+			}
+		}
+
+	default:
+		panic("SetKey error:要传入的是结构体指针")
+
+	}
+	if !isSet {
+		panic("SetKey 没有成功, 是不是没有设置Key属性")
+
+	}
+	return ""
+}
+
+//删除
+func (b *Baas) DelObj(key string) error {
+	return b.del(key)
+}
+
+//保存  参数是指针
+func (b *Baas) SaveObj(a interface{}) (string, error) {
+	key := encrypt.MakeUUID()
+	newKey := setKey(a, key, false)
+	//利用反射加入一个key的值  如果没有Key属性，就报错。
+	str, err := gobutil.ToBytes(a)
+	if err != nil {
+		return "", err
+	}
+	err = b.set(newKey, string(str))
+	if err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+//第二个参数是指针
+func (b *Baas) FetchObj(key string, obj interface{}) error {
+	data, err := b.get(key)
+	if err != nil {
+		return err
+	}
+	err = gobutil.ToStruct([]byte(data), obj)
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+//list
+func (b *Baas) ListObj(page int, pagesize int, dstStruct interface{}) (resErr error) {
+	strs, err := b.list(page, pagesize)
+	if err != nil {
+		return err
+	}
+
+	v := reflect.ValueOf(dstStruct)
+
+	switch v.Kind() {
+	case reflect.Ptr:
+		t := v.Type().Elem()
+		tEle := t.Elem()
+		if tEle.Kind() != reflect.Ptr {
+			panic("数组元素应该是*Struct,而不是Struct")
+		}
+		v2 := v.Elem()
+
+		for _, data := range strs {
+			newObj := reflect.New(tEle.Elem())
+
+			err = gobutil.ToStruct([]byte(data), newObj.Interface())
+			if err != nil {
+				return err
+			}
+
+			v2 = reflect.Append(v2, newObj)
+
+		}
+
+		v.Elem().Set(v2)
+		return nil
+	default:
+		return errors.New("only support struct pointer")
+	}
+
 }
