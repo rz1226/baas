@@ -3,12 +3,16 @@ package baas
 import (
 	"errors"
 	"fmt"
+	"github.com/rz1226/cache"
 	"github.com/rz1226/encrypt"
 	"github.com/rz1226/gobutil"
 	"github.com/rz1226/mysqlx"
 	"os"
 	"reflect"
+	"time"
 )
+
+var ccache = cache.NewCCache(1000)
 
 /**
 
@@ -173,6 +177,28 @@ func (b *Baas) list(page int, pagesize int) ([]string, error) {
 		result = append(result, v.Content)
 	}
 	return result, nil
+}
+
+func (b *Baas) Count() (int64, error) {
+	//加一个时间很短的缓存
+	key := cache.NewKey("count:" + b.Table)
+	resCache, err := key.FetchFromCCache(ccache)
+	if err == nil {
+		if count, ok := resCache.(int64); ok {
+			return count, nil
+		}
+	}
+
+	sql := mysqlx.SQLStr("select count(*) from " + b.Table)
+	res, err := sql.Query(b.Dbkit)
+	if err != nil {
+		return 0, err
+	}
+
+	data := cache.NewData(res).SetKey("count:" + b.Table)
+	data.ToCCache(ccache, time.Second*1)
+
+	return res.ToInt64()
 }
 
 // set key  如果forceSet == false 则没有在Key的位置是空的时候，才会set一个随机key    返回值为strut最终的key
