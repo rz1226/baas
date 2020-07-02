@@ -7,6 +7,7 @@ import (
 	"github.com/rz1226/encrypt"
 	"github.com/rz1226/gobutil"
 	"github.com/rz1226/mysqlx"
+	"github.com/rz1226/rztool"
 	"os"
 	"reflect"
 	"time"
@@ -282,14 +283,11 @@ func (b *Baas) DelObj(key string) error {
 	return b.del(key)
 }
 
-//保存  参数是指针
+//保存  参数是指针  .digest会从a参数copy一模一样的值
 func (b *Baas) SaveObj(a interface{}, digest interface{}) (string, error) {
 	key := encrypt.MakeUUID()
 	newKey := setKey(a, key, false)
-	newKey2 := setKey(digest, key, false)
-	if newKey != newKey2 {
-		return "", errors.New("content和digest的key不一致")
-	}
+	rztool.CopyStruct(a, digest)
 	//利用反射加入一个key的值  如果没有Key属性，就报错。
 	str, err := gobutil.ToBytes(a)
 	if err != nil {

@@ -12,5 +12,7 @@ github.com/rz1226/gobutil v1.0.2 h1:cDZM75camOdDEOrfc/uCNdKOtO5kROaE48w0mSOTSnk=
 github.com/rz1226/gobutil v1.0.2/go.mod h1:gcoXyM/nq52p7/ViFx2Op/loastWTBshPYQLSp1E9BQ=
 github.com/rz1226/mysqlx v1.0.4 h1:QeJQr7s9lS6oDl7JvHp2kCx6STOnjRjbWyMWOhptJqU=
 github.com/rz1226/mysqlx v1.0.4/go.mod h1:kNwtoJLOJXF4X7cATJwMNLWwmXYTlR26kL4XDxGH/TU=
+github.com/rz1226/rztool v1.0.2 h1:bJE6YVrXKV9yJkM2vAuj+GqrU09e7EUken7mxjbSj7g=
+github.com/rz1226/rztool v1.0.2/go.mod h1:lVfVVAfdJa4R3QKTmyqPU4iMVAqPix2FLqc65cK9nn4=
 github.com/wsxiaoys/terminal v0.0.0-20160513160801-0940f3fc43a0 h1:3UeQBvD0TFrlVjOeLOBz+CPAI8dnbqNSVwUwRrkp7vQ=
 github.com/wsxiaoys/terminal v0.0.0-20160513160801-0940f3fc43a0/go.mod h1:IXCdmsXIht47RaVFLEdVnh1t+pgYtTAhQGj73kz+2DM=
