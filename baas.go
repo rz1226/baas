@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+/**
+增加digest， 适应长列表数据可能过大的问题
+实际应用的时候，一般来说content的内容包括digest，
+*/
+
 var ccache = cache.NewCCache(1000)
 
 /**
@@ -19,6 +24,7 @@ var ccache = cache.NewCCache(1000)
 CREATE TABLE `baas_item` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
   `key` varchar(50) DEFAULT NULL,
+  `digest`  BLOB default null comment'摘要',
   `content` MEDIUMBLOB DEFAULT NULL comment'数据内容',
 
   `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -38,6 +44,7 @@ CREATE TABLE `baas_item` (
 type baasItem struct {
 	ID         int64  `orm:"id" auto:"1"`
 	Key        string `orm:"key"`
+	Digest     string `orm:"digest"`
 	Content    string `orm:"content"`
 	CreateTime string `orm:"create_time" auto:"1"`
 	UpdateTime string `orm: "last_update_time" auto:"1"`
@@ -64,22 +71,23 @@ type Baas struct {
 }
 
 // 返回数据唯一表示 key
-func (b *Baas) set(key, data string) error {
+func (b *Baas) set(key, data string, digest string) error {
 	if b.exist(key) {
-		return b.replace(key, data)
+		return b.replace(key, data, digest)
 	} else {
-		return b.add(key, data)
+		return b.add(key, data, digest)
 	}
 
 }
 
-func (b *Baas) add(key, data string) error {
+func (b *Baas) add(key, data string, digest string) error {
 	if key == "" {
 		return errors.New("key 不能为空")
 	}
 
 	item := new(baasItem)
 	item.Key = key
+	item.Digest = digest
 	item.Content = data
 
 	sql, err := mysqlx.NewBM(item).ToSQLInsert(b.Table)
@@ -106,8 +114,8 @@ func (b *Baas) exist(key string) bool {
 }
 
 // 修改数据
-func (b *Baas) replace(key, data string) error {
-	_, err := mysqlx.SQLStr("update "+b.Table+" set content = ? where `key` = ? limit 1").AddParams(data, key).Exec(b.Dbkit)
+func (b *Baas) replace(key, data string, digest string) error {
+	_, err := mysqlx.SQLStr("update "+b.Table+" set content = ? ,digest = ? where `key` = ? limit 1").AddParams(data, digest, key).Exec(b.Dbkit)
 	return err
 }
 
@@ -152,7 +160,7 @@ func (b *Baas) del(key string) error {
 	return err
 }
 
-//默认根据时间排序 返回key列表
+//默认根据时间排序 返回内容列表   注意baas的key同时存在在内容里
 func (b *Baas) list(page int, pagesize int) ([]string, error) {
 	if page < 1 {
 		page = 1
@@ -179,6 +187,32 @@ func (b *Baas) list(page int, pagesize int) ([]string, error) {
 	return result, nil
 }
 
+//默认根据时间排序 返回digest列表 注意baas的key同时存在在digest里
+func (b *Baas) listDigest(page int, pagesize int) ([]string, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pagesize < 1 || pagesize > 10000 {
+		pagesize = 10
+	}
+	offset := pagesize * (page - 1)
+	limit := pagesize
+	sql := mysqlx.SQLStr("select `key`,`digest` from " + b.Table + " order by id desc limit " + fmt.Sprint(limit) + " offset  " + fmt.Sprint(offset))
+	res, err := sql.Query(b.Dbkit)
+	if err != nil {
+		return nil, err
+	}
+	var items []*baasItem
+	err = res.ToStruct(&items)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(items))
+	for _, v := range items {
+		result = append(result, v.Digest)
+	}
+	return result, nil
+}
 func (b *Baas) Count() (int64, error) {
 	//加一个时间很短的缓存
 	key := cache.NewKey("count:" + b.Table)
@@ -211,7 +245,6 @@ func setKey(dstStruct interface{}, key string, forceSet bool) string {
 			os.Exit(1)
 		}
 	}()
-	isSet := false
 	v := reflect.ValueOf(dstStruct)
 
 	switch v.Kind() {
@@ -222,16 +255,17 @@ func setKey(dstStruct interface{}, key string, forceSet bool) string {
 			fieldName := t.Field(i).Name
 			vType := t.Field(i).Type
 			if fmt.Sprint(vType) == "string" && fieldName == "Key" {
-				if v.Elem().Field(i).Interface().(string) == "" {
+				oriKey := v.Elem().Field(i).Interface().(string)
+				if oriKey == "" {
 					v.Elem().Field(i).Set(reflect.ValueOf(key))
+					return v.Elem().Field(i).Interface().(string)
 				}
 				if forceSet {
 					v.Elem().Field(i).Set(reflect.ValueOf(key))
+					return v.Elem().Field(i).Interface().(string)
 				}
-				isSet = true
-				return v.Elem().Field(i).Interface().(string)
-			} else {
 
+				return v.Elem().Field(i).Interface().(string)
 			}
 		}
 
@@ -239,10 +273,7 @@ func setKey(dstStruct interface{}, key string, forceSet bool) string {
 		panic("SetKey error:要传入的是结构体指针")
 
 	}
-	if !isSet {
-		panic("SetKey 没有成功, 是不是没有设置Key属性")
-
-	}
+	panic("SetKey 没有成功, 是不是没有定义Key属性")
 	return ""
 }
 
@@ -252,15 +283,23 @@ func (b *Baas) DelObj(key string) error {
 }
 
 //保存  参数是指针
-func (b *Baas) SaveObj(a interface{}) (string, error) {
+func (b *Baas) SaveObj(a interface{}, digest interface{}) (string, error) {
 	key := encrypt.MakeUUID()
 	newKey := setKey(a, key, false)
+	newKey2 := setKey(digest, key, false)
+	if newKey != newKey2 {
+		return "", errors.New("content和digest的key不一致")
+	}
 	//利用反射加入一个key的值  如果没有Key属性，就报错。
 	str, err := gobutil.ToBytes(a)
 	if err != nil {
 		return "", err
 	}
-	err = b.set(newKey, string(str))
+	digestStr, err := gobutil.ToBytes(digest)
+	if err != nil {
+		return "", err
+	}
+	err = b.set(newKey, string(str), string(digestStr))
 	if err != nil {
 		return "", err
 	}
@@ -287,9 +326,7 @@ func (b *Baas) ListObj(page int, pagesize int, dstStruct interface{}) (resErr er
 	if err != nil {
 		return err
 	}
-
 	v := reflect.ValueOf(dstStruct)
-
 	switch v.Kind() {
 	case reflect.Ptr:
 		t := v.Type().Elem()
@@ -301,20 +338,45 @@ func (b *Baas) ListObj(page int, pagesize int, dstStruct interface{}) (resErr er
 
 		for _, data := range strs {
 			newObj := reflect.New(tEle.Elem())
-
 			err = gobutil.ToStruct([]byte(data), newObj.Interface())
 			if err != nil {
 				return err
 			}
-
 			v2 = reflect.Append(v2, newObj)
-
 		}
 
 		v.Elem().Set(v2)
 		return nil
 	default:
-		return errors.New("only support struct pointer")
+		return errors.New("ListObj : only support struct pointer")
 	}
+}
 
+func (b *Baas) ListObjDigest(page int, pagesize int, dstStruct interface{}) (resErr error) {
+	strs, err := b.listDigest(page, pagesize)
+	if err != nil {
+		return err
+	}
+	v := reflect.ValueOf(dstStruct)
+	switch v.Kind() {
+	case reflect.Ptr:
+		t := v.Type().Elem()
+		tEle := t.Elem()
+		if tEle.Kind() != reflect.Ptr {
+			panic("数组元素应该是*Struct,而不是Struct")
+		}
+		v2 := v.Elem()
+		for _, data := range strs {
+			newObj := reflect.New(tEle.Elem())
+			err = gobutil.ToStruct([]byte(data), newObj.Interface())
+			if err != nil {
+				return err
+			}
+			v2 = reflect.Append(v2, newObj)
+		}
+		v.Elem().Set(v2)
+		return nil
+	default:
+		return errors.New("ListObjDigest : only support struct pointer")
+	}
 }
