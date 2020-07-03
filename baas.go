@@ -3,7 +3,7 @@ package baas
 import (
 	"errors"
 	"fmt"
-	"github.com/rz1226/cache"
+	"github.com/rz1226/cache2"
 	"github.com/rz1226/encrypt"
 	"github.com/rz1226/gobutil"
 	"github.com/rz1226/mysqlx"
@@ -18,7 +18,9 @@ import (
 实际应用的时候，一般来说content的内容包括digest，
 */
 
-var ccache = cache.NewCCache(1000)
+var ccacheCount = cache2.NewCCache(1000)
+var ccacheFetchDigest = cache2.NewCCache(10000)
+var ccacheFetch = cache2.NewCCache(10000)
 
 /**
 
@@ -74,6 +76,7 @@ type Baas struct {
 // 返回数据唯一表示 key
 func (b *Baas) set(key, data string, digest string) error {
 	if b.exist(key) {
+
 		return b.replace(key, data, digest)
 	} else {
 		return b.add(key, data, digest)
@@ -85,7 +88,6 @@ func (b *Baas) add(key, data string, digest string) error {
 	if key == "" {
 		return errors.New("key 不能为空")
 	}
-
 	item := new(baasItem)
 	item.Key = key
 	item.Digest = digest
@@ -120,10 +122,11 @@ func (b *Baas) replace(key, data string, digest string) error {
 	return err
 }
 
-func (b *Baas) get(key string) (string, error) {
+//不带缓存
+func (b *Baas) _get(key string) (string, error) {
 	item := new(baasItem)
 	//var item *Item
-	res, err := mysqlx.SQLStr("select * from " + b.Table + " where `key` = ? limit 1 ").AddParams(key).Query(b.Dbkit)
+	res, err := mysqlx.SQLStr("select id,key,`content` from " + b.Table + " where `key` = ? limit 1 ").AddParams(key).Query(b.Dbkit)
 	if err != nil {
 		return "", err
 	}
@@ -132,6 +135,58 @@ func (b *Baas) get(key string) (string, error) {
 		return "", err
 	}
 	return item.Content, nil
+}
+
+func (b *Baas) get(key string, isCache bool) (string, error) {
+	if isCache == false {
+		return b._get(key)
+	}
+
+	f := func() (interface{}, error) {
+		return b._get(key)
+	}
+	res, err := ccacheFetch.Use(key, f, time.Second*5)
+	if err != nil {
+		return "", err
+	}
+	content, ok := res.(string)
+	if ok {
+		return content, nil
+	}
+	return b._get(key)
+}
+
+func (b *Baas) _getDigest(key string) (string, error) {
+	item := new(baasItem)
+	//var item *Item
+	res, err := mysqlx.SQLStr("select id,key,`digest` from " + b.Table + " where `key` = ? limit 1 ").AddParams(key).Query(b.Dbkit)
+	if err != nil {
+		return "", err
+	}
+	err = res.ToStruct(item)
+	if err != nil {
+		return "", err
+	}
+	return item.Digest, nil
+}
+
+func (b *Baas) getDigest(key string, isCache bool) (string, error) {
+	if isCache == false {
+		return b._getDigest(key)
+	}
+
+	f := func() (interface{}, error) {
+		return b._getDigest(key)
+	}
+	res, err := ccacheFetchDigest.Use(key, f, time.Second*5)
+	if err != nil {
+		return "", err
+	}
+	content, ok := res.(string)
+	if ok {
+		return content, nil
+	}
+	return b._getDigest(key)
 }
 
 //批量get 最大1000个
@@ -214,25 +269,29 @@ func (b *Baas) listDigest(page int, pagesize int) ([]string, error) {
 	}
 	return result, nil
 }
+
 func (b *Baas) Count() (int64, error) {
-	//加一个时间很短的缓存
-	key := cache.NewKey("count:" + b.Table)
-	resCache, err := key.FetchFromCCache(ccache)
-	if err == nil {
-		if count, ok := resCache.(int64); ok {
-			return count, nil
-		}
+	f := func() (interface{}, error) {
+		return b.count()
 	}
+	res, err := ccacheCount.Use("count:"+b.Table, f, time.Second*5)
+	if err != nil {
+		return 0, err
+	}
+	count, ok := res.(int64)
+	if ok {
+		return count, nil
+	}
+	return b.count()
+}
+
+func (b *Baas) count() (int64, error) {
 
 	sql := mysqlx.SQLStr("select count(*) from " + b.Table)
 	res, err := sql.Query(b.Dbkit)
 	if err != nil {
 		return 0, err
 	}
-
-	data := cache.NewData(res).SetKey("count:" + b.Table)
-	data.ToCCache(ccache, time.Second*1)
-
 	return res.ToInt64()
 }
 
@@ -305,8 +364,20 @@ func (b *Baas) SaveObj(a interface{}, digest interface{}) (string, error) {
 }
 
 //第二个参数是指针
-func (b *Baas) FetchObj(key string, obj interface{}) error {
-	data, err := b.get(key)
+func (b *Baas) FetchObj(key string, obj interface{}, isCache bool) error {
+	data, err := b.get(key, isCache)
+	if err != nil {
+		return err
+	}
+	err = gobutil.ToStruct([]byte(data), obj)
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+func (b *Baas) FetchObjDegist(key string, obj interface{}, isCache bool) error {
+	data, err := b.getDigest(key, isCache)
 	if err != nil {
 		return err
 	}

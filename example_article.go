@@ -32,7 +32,7 @@ func DelArticle(key string) error {
 
 //获取详情
 func GetArticle(key string, article *Article) error {
-	return DefaultBaas.FetchObj(key, article)
+	return DefaultBaas.FetchObj(key, article, false)
 }
 
 func ListArticle() error {
