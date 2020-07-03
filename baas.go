@@ -126,7 +126,7 @@ func (b *Baas) replace(key, data string, digest string) error {
 func (b *Baas) _get(key string) (string, error) {
 	item := new(baasItem)
 	//var item *Item
-	res, err := mysqlx.SQLStr("select id,key,`content` from " + b.Table + " where `key` = ? limit 1 ").AddParams(key).Query(b.Dbkit)
+	res, err := mysqlx.SQLStr("select `id`,`key`,`content` from " + b.Table + " where `key` = ? limit 1 ").AddParams(key).Query(b.Dbkit)
 	if err != nil {
 		return "", err
 	}
@@ -159,7 +159,7 @@ func (b *Baas) get(key string, isCache bool) (string, error) {
 func (b *Baas) _getDigest(key string) (string, error) {
 	item := new(baasItem)
 	//var item *Item
-	res, err := mysqlx.SQLStr("select id,key,`digest` from " + b.Table + " where `key` = ? limit 1 ").AddParams(key).Query(b.Dbkit)
+	res, err := mysqlx.SQLStr("select `id`,`key`,`digest` from " + b.Table + " where `key` = ? limit 1 ").AddParams(key).Query(b.Dbkit)
 	if err != nil {
 		return "", err
 	}
