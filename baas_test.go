@@ -2,6 +2,7 @@ package baas
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -29,5 +30,7 @@ func Test_gendigest(t *testing.T) {
 	b, err := genDigest(a)
 
 	fmt.Println(b, err)
+
+	fmt.Println(reflect.TypeOf(a), reflect.TypeOf(b))
 
 }

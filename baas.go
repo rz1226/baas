@@ -359,7 +359,7 @@ func genDigest(a interface{}) (interface{}, error) {
 	default:
 		return nil, errors.New("only support struct pointer")
 	}
-	return res, nil
+	return res.Interface(), nil
 }
 
 //保存  参数是指针  .digest会从a参数copy一模一样的值
