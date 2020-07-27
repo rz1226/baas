@@ -16,14 +16,10 @@ type Article struct {
 	CreateTime string
 	Public     bool
 }
-type ArticleDigest struct {
-	Key   string
-	Title string
-}
 
 //保存文章
-func SaveArticle(a *Article, b *ArticleDigest) (string, error) {
-	return DefaultBaas.SaveObj(a, b)
+func SaveArticle(a *Article) (string, error) {
+	return DefaultBaas.SaveObj(a)
 }
 
 func DelArticle(key string) error {
@@ -45,8 +41,8 @@ func ListArticle() error {
 	return err
 }
 func ListArticleDigest() error {
-	tmp := make([]*ArticleDigest, 0)
-	var objs *[]*ArticleDigest = &tmp
+	tmp := make([]*Article, 0)
+	var objs *[]*Article = &tmp
 	err := DefaultBaas.ListObjDigest(1, 30, objs)
 	for _, v := range *objs {
 		fmt.Println(*v)

@@ -7,7 +7,6 @@ import (
 	"github.com/rz1226/encrypt"
 	"github.com/rz1226/gobutil"
 	"github.com/rz1226/mysqlx"
-	"github.com/rz1226/rztool"
 	"os"
 	"reflect"
 	"time"
@@ -47,7 +46,7 @@ CREATE TABLE `baas_item` (
 type baasItem struct {
 	ID         int64  `orm:"id" auto:"1"`
 	Key        string `orm:"key"`
-	Digest     string `orm:"digest"`
+	Digest     string `orm:"digest"` //非详情信息，一般用于列表展示的时候，不需要把所有的数据都拿出来，可能会比较大
 	Content    string `orm:"content"`
 	CreateTime string `orm:"create_time" auto:"1"`
 	UpdateTime string `orm: "last_update_time" auto:"1"`
@@ -342,12 +341,37 @@ func (b *Baas) DelObj(key string) error {
 	return b.del(key)
 }
 
+//从一个baas obj ,生成digest，根据tag, 其实digest和obj是同一个结构，只是正文字段为空而已。
+func genDigest(a interface{}) (interface{}, error) {
+	t := reflect.TypeOf(a)
+	v := reflect.ValueOf(a)
+	res := reflect.New(t.Elem())
+	switch v.Kind() {
+	case reflect.Ptr:
+		length := t.Elem().NumField()
+		for i := 0; i < length; i++ {
+			tag := t.Elem().Field(i).Tag.Get("digest")
+			if tag != "" {
+				res.Elem().Field(i).Set(v.Elem().Field(i))
+			}
+		}
+
+	default:
+		return nil, errors.New("only support struct pointer")
+	}
+	return res, nil
+}
+
 //保存  参数是指针  .digest会从a参数copy一模一样的值
-func (b *Baas) SaveObj(a interface{}, digest interface{}) (string, error) {
+func (b *Baas) SaveObj(a interface{}) (string, error) {
+
 	key := encrypt.MakeUUID()
-	newKey := setKey(a, key, false)
-	rztool.CopyStruct(a, digest)
 	//利用反射加入一个key的值  如果没有Key属性，就报错。
+	newKey := setKey(a, key, false)
+	digest, err := genDigest(a)
+	if err != nil {
+		return "", err
+	}
 	str, err := gobutil.ToBytes(a)
 	if err != nil {
 		return "", err
